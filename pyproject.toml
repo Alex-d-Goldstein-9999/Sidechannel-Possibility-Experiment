@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpu-sidechannel-experiment"
+version = "0.1.0"
+description = "Safe experiment harness to measure CPU timer jitter under GPU load."
+license = {text = "MIT"}
+authors = [ {name = "Alex Goldstein", name = "Mitchell Calapai", name = "Braeden Turner"} ]
+
