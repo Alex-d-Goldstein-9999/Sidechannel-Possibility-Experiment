@@ -1,0 +1,10 @@
+# Optional GPU / Apple silicon packages — install this AFTER creating & activating your venv
+
+
+torch
+torchvision
+torchaudio
+
+# For TensorFlow on macOS (Apple-supplied builds + Metal plugin)
+tensorflow-macos
+tensorflow-metal
