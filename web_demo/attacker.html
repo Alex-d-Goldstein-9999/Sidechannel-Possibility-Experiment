@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPU Side-Channel Attack Demo - Attacker</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #1a1a1a;
+        color: #e0e0e0;
+      }
+      .container {
+        background: #2a2a2a;
+        border-radius: 10px;
+        padding: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      }
+      h1 {
+        color: #ff4444;
+        border-bottom: 3px solid #ff4444;
+        padding-bottom: 10px;
+      }
+      h2 {
+        color: #44ff44;
+        margin-top: 30px;
+      }
+      .status {
+        padding: 15px;
+        border-radius: 5px;
+        margin: 10px 0;
+        font-weight: bold;
+      }
+      .status.idle {
+        background: #333;
+        color: #aaa;
+      }
+      .status.detected {
+        background: #4a1a1a;
+        color: #ff6666;
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+      .chart-container {
+        margin: 20px 0;
+        background: #1a1a1a;
+        padding: 20px;
+        border-radius: 5px;
+      }
+      canvas {
+        width: 100%;
+        height: 300px;
+        background: #0a0a0a;
+        border: 1px solid #444;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin: 20px 0;
+      }
+      .stat-box {
+        background: #333;
+        padding: 15px;
+        border-radius: 5px;
+        text-align: center;
+      }
+      .stat-value {
+        font-size: 2em;
+        font-weight: bold;
+        color: #44ff44;
+      }
+      .stat-label {
+        font-size: 0.9em;
+        color: #aaa;
+        margin-top: 5px;
+      }
+      button {
+        background: #44ff44;
+        color: #000;
+        border: none;
+        padding: 12px 24px;
+        font-size: 16px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+        margin: 10px 5px;
+      }
+      button:hover {
+        background: #66ff66;
+      }
+      button:disabled {
+        background: #444;
+        color: #888;
+        cursor: not-allowed;
+      }
+      .instructions {
+        background: #2a4a2a;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 20px 0;
+        border-left: 4px solid #44ff44;
+      }
+      .warning {
+        background: #4a2a1a;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 20px 0;
+        border-left: 4px solid #ff8844;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🔴 GPU Side-Channel Attack Demo - Attacker Page</h1>
+
+      <div class="instructions">
+        <strong>📋 Instructions:</strong>
+        <ol>
+          <li>Click "Start Monitoring" to begin the attack</li>
+          <li>Open <code>victim.html</code> in another browser tab</li>
+          <li>Click "Start GPU Load" on the victim page</li>
+          <li>
+            Observe how this page detects the victim's GPU activity through
+            timing measurements
+          </li>
+        </ol>
+      </div>
+
+      <div class="warning">
+        <strong>⚠️ Note:</strong> This is a REAL GPU side-channel attack
+        demonstration. The timing measurements shown are actual GPU operation
+        times that reveal when other tabs are using the GPU. <br /><br />
+        <strong>What to expect:</strong> When GPU load is active in another tab,
+        the <strong>timing values should INCREASE</strong> (operations take
+        longer due to contention). Watch for the graph line to rise above the
+        baseline and the average timing to increase.
+      </div>
+
+      <div style="text-align: center; margin: 20px 0">
+        <button id="startBtn" onclick="startAttack()">Start Monitoring</button>
+        <button id="stopBtn" onclick="stopAttack()" disabled>
+          Stop Monitoring
+        </button>
+        <button onclick="clearData()">Clear Data</button>
+      </div>
+
+      <div id="status" class="status idle">
+        Status: Idle - Waiting to start monitoring...
+      </div>
+
+      <div class="stats">
+        <div class="stat-box">
+          <div class="stat-value" id="avgTiming">0</div>
+          <div class="stat-label">Avg Timing (μs)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="maxTiming">0</div>
+          <div class="stat-label">Max Timing (μs)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="jitter">0</div>
+          <div class="stat-label">Jitter (std dev)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="samples">0</div>
+          <div class="stat-label">Samples</div>
+        </div>
+      </div>
+
+      <h2>GPU Timing Measurements (Real-time)</h2>
+      <div class="chart-container">
+        <canvas id="timingChart"></canvas>
+      </div>
+
+      <h2>How It Works</h2>
+      <div
+        style="
+          background: #333;
+          padding: 20px;
+          border-radius: 5px;
+          line-height: 1.6;
+        "
+      >
+        <p><strong>⚠️ These are REAL GPU timing measurements:</strong></p>
+        <p
+          style="
+            margin: 10px 0;
+            padding: 10px;
+            background: #2a2a2a;
+            border-left: 3px solid #44ff44;
+          "
+        >
+          The numbers and graph above show
+          <strong>actual GPU operation completion times</strong> measured using
+          WebGL. Each measurement performs real GPU work (shader execution, draw
+          calls) and uses <code>gl.finish()</code> to wait for the GPU to
+          complete. When other tabs use the GPU, these operations take longer
+          due to resource contention, creating the timing side-channel.
+        </p>
+        <p>This attack exploits the shared GPU resources in modern browsers:</p>
+        <ul>
+          <li>
+            <strong>High-frequency timing probes:</strong> Continuously measures
+            GPU operation timing using WebGL (20 draw calls per measurement)
+          </li>
+          <li>
+            <strong>Shared resource contention:</strong> When other tabs use the
+            GPU, timing measurements show increased latency (visible in the
+            graph)
+          </li>
+          <li>
+            <strong>Statistical analysis:</strong> Detects patterns in timing
+            jitter that indicate concurrent GPU usage
+          </li>
+          <li>
+            <strong>Cross-tab inference:</strong> Can detect activity in other
+            browser tabs without direct access
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <script>
+      let isMonitoring = false;
+      let timingData = [];
+      let chartCtx = null;
+      let glContext = null;
+      let glSetup = null;
+      const MAX_SAMPLES = 1000;
+      const DETECTION_THRESHOLD = 1.15; // Lowered to 15% increase for better sensitivity
+      const RECENT_WINDOW = 50; // Use last 50 samples for faster detection (was 200)
+
+      // Initialize canvas
+      function initChart() {
+        chartCtx = document.getElementById("timingChart").getContext("2d");
+        const canvas = document.getElementById("timingChart");
+        canvas.width = canvas.offsetWidth;
+        canvas.height = 300;
+      }
+
+      // Create and initialize WebGL context (done once)
+      function initWebGL() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 512;
+        canvas.height = 512;
+        const gl =
+          canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+        if (!gl) {
+          throw new Error("WebGL not supported");
+        }
+
+        // Create shader program (reused for all measurements)
+        const vertexShaderSource = `
+                attribute vec2 a_position;
+                void main() {
+                    gl_Position = vec4(a_position, 0.0, 1.0);
+                }
+            `;
+
+        const fragmentShaderSource = `
+                precision highp float;
+                uniform float u_time;
+                void main() {
+                    vec2 p = gl_FragCoord.xy / 512.0;
+                    float d = length(p - 0.5);
+                    vec3 col = vec3(
+                        sin(d * 20.0 + u_time) * 0.5 + 0.5,
+                        cos(d * 15.0 + u_time * 1.2) * 0.5 + 0.5,
+                        sin(d * 25.0 + u_time * 0.8) * 0.5 + 0.5
+                    );
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vertexShader, vertexShaderSource);
+        gl.compileShader(vertexShader);
+        if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+          throw new Error("Vertex shader compilation failed");
+        }
+
+        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fragmentShader, fragmentShaderSource);
+        gl.compileShader(fragmentShader);
+        if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+          throw new Error("Fragment shader compilation failed");
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          throw new Error("Program linking failed");
+        }
+
+        gl.useProgram(program);
+
+        // Create vertex buffer (reused)
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        const positionLocation = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+        const timeLocation = gl.getUniformLocation(program, "u_time");
+
+        return { gl, program, timeLocation, buffer };
+      }
+
+      // Measure GPU operation timing (this is the actual attack)
+      function measureGPUTiming(setup) {
+        const { gl, timeLocation } = setup;
+
+        // Record start time
+        const start = performance.now();
+
+        // Set uniform and perform multiple draws to create measurable work
+        const time = performance.now() / 1000.0;
+        gl.uniform1f(timeLocation, time);
+
+        // Perform multiple draw calls to increase GPU work
+        // This makes the timing more sensitive to contention
+        for (let i = 0; i < 20; i++) {
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        // Force GPU to complete all operations
+        gl.finish();
+
+        // Record end time
+        const end = performance.now();
+
+        // Return timing in microseconds
+        return (end - start) * 1000;
+      }
+
+      // Main monitoring loop
+      async function monitorLoop() {
+        let baseline = null;
+        let baselineSamples = [];
+        let baselineCount = 0;
+        const BASELINE_SAMPLES = 200;
+
+        while (isMonitoring) {
+          const timing = measureGPUTiming(glSetup);
+
+          // Collect baseline
+          if (baselineCount < BASELINE_SAMPLES) {
+            baselineSamples.push(timing);
+            baselineCount++;
+            if (baselineCount === BASELINE_SAMPLES) {
+              baseline =
+                baselineSamples.reduce((a, b) => a + b, 0) /
+                baselineSamples.length;
+              document.getElementById(
+                "status"
+              ).textContent = `Status: Baseline established (${Math.round(
+                baseline
+              )}μs) - Monitoring for GPU activity...`;
+            } else {
+              document.getElementById(
+                "status"
+              ).textContent = `Status: Establishing baseline... (${baselineCount}/${BASELINE_SAMPLES})`;
+            }
+          } else {
+            // Add to timing data
+            timingData.push(timing);
+            if (timingData.length > MAX_SAMPLES) {
+              timingData.shift();
+            }
+
+            // Calculate statistics - use shorter window for faster detection
+            const recentData = timingData.slice(-RECENT_WINDOW);
+            const avg =
+              recentData.reduce((a, b) => a + b, 0) / recentData.length;
+            const max = Math.max(...recentData);
+            const variance =
+              recentData.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) /
+              recentData.length;
+            const stdDev = Math.sqrt(variance);
+
+            // Update stats
+            document.getElementById("avgTiming").textContent =
+              Math.round(avg).toLocaleString();
+            document.getElementById("maxTiming").textContent =
+              Math.round(max).toLocaleString();
+            document.getElementById("jitter").textContent =
+              Math.round(stdDev).toLocaleString();
+            document.getElementById("samples").textContent = timingData.length;
+
+            // Detect activity using baseline comparison
+            // With GPU load, timing should be HIGHER (operations take longer)
+            const statusEl = document.getElementById("status");
+            const percentChange = baseline ? (avg / baseline - 1) * 100 : 0;
+
+            if (baseline && avg > baseline * DETECTION_THRESHOLD) {
+              statusEl.className = "status detected";
+              statusEl.textContent = `⚠️ GPU ACTIVITY DETECTED! (${percentChange.toFixed(
+                1
+              )}% above baseline)`;
+            } else if (baseline && avg > baseline * 1.05) {
+              // Show warning for smaller increases
+              statusEl.className = "status idle";
+              statusEl.textContent = `Status: Possible activity (${percentChange.toFixed(
+                1
+              )}% above baseline)`;
+            } else {
+              statusEl.className = "status idle";
+              statusEl.textContent = `Status: Monitoring (baseline: ${Math.round(
+                baseline
+              )}μs, current: ${Math.round(avg)}μs, ${
+                percentChange >= 0 ? "+" : ""
+              }${percentChange.toFixed(1)}%)`;
+            }
+
+            // Update chart
+            drawChart(baseline);
+          }
+
+          // Small delay - but not too much to maintain high frequency
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
+      // Draw timing chart
+      function drawChart(baseline = null) {
+        if (!chartCtx || timingData.length === 0) return;
+
+        const canvas = chartCtx.canvas;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        chartCtx.clearRect(0, 0, width, height);
+
+        if (timingData.length < 2) return;
+
+        const min = Math.min(...timingData);
+        const max = Math.max(...timingData);
+        const range = max - min || 1;
+
+        // Draw grid
+        chartCtx.strokeStyle = "#333";
+        chartCtx.lineWidth = 1;
+        for (let i = 0; i <= 10; i++) {
+          const y = (i / 10) * height;
+          chartCtx.beginPath();
+          chartCtx.moveTo(0, y);
+          chartCtx.lineTo(width, y);
+          chartCtx.stroke();
+        }
+
+        // Draw baseline reference line
+        if (baseline && timingData.length > 0) {
+          const baselineY = height - ((baseline - min) / range) * height;
+          chartCtx.strokeStyle = "#888";
+          chartCtx.setLineDash([5, 5]);
+          chartCtx.lineWidth = 2;
+          chartCtx.beginPath();
+          chartCtx.moveTo(0, baselineY);
+          chartCtx.lineTo(width, baselineY);
+          chartCtx.stroke();
+          chartCtx.setLineDash([]);
+
+          // Label baseline
+          chartCtx.fillStyle = "#888";
+          chartCtx.font = "12px monospace";
+          chartCtx.fillText(
+            `Baseline: ${Math.round(baseline)}μs`,
+            10,
+            baselineY - 5
+          );
+        }
+
+        // Draw timing data - color code based on baseline
+        const stepX = width / (timingData.length - 1);
+
+        // Draw line segments, coloring above baseline differently
+        chartCtx.lineWidth = 2;
+        chartCtx.beginPath();
+
+        timingData.forEach((value, index) => {
+          const x = index * stepX;
+          const y = height - ((value - min) / range) * height;
+
+          if (index === 0) {
+            chartCtx.moveTo(x, y);
+          } else {
+            // Color code: red if above baseline, green if below
+            if (baseline) {
+              const prevValue = timingData[index - 1];
+              const isAboveBaseline = value > baseline || prevValue > baseline;
+              chartCtx.strokeStyle = isAboveBaseline ? "#ff6666" : "#44ff44";
+              chartCtx.stroke(); // Stroke previous segment
+              chartCtx.beginPath();
+              chartCtx.moveTo(
+                (index - 1) * stepX,
+                height - ((prevValue - min) / range) * height
+              );
+            }
+            chartCtx.lineTo(x, y);
+          }
+        });
+
+        // Final stroke
+        if (baseline) {
+          const lastValue = timingData[timingData.length - 1];
+          chartCtx.strokeStyle = lastValue > baseline ? "#ff6666" : "#44ff44";
+        } else {
+          chartCtx.strokeStyle = "#44ff44";
+        }
+        chartCtx.stroke();
+
+        // Draw axis labels
+        chartCtx.fillStyle = "#aaa";
+        chartCtx.font = "12px monospace";
+        chartCtx.fillText(`Min: ${Math.round(min)}μs`, 10, height - 10);
+        chartCtx.fillText(`Max: ${Math.round(max)}μs`, 10, 20);
+      }
+
+      function startAttack() {
+        if (isMonitoring) return;
+
+        try {
+          isMonitoring = true;
+          timingData = [];
+          document.getElementById("startBtn").disabled = true;
+          document.getElementById("stopBtn").disabled = false;
+          document.getElementById("status").textContent =
+            "Status: Initializing WebGL...";
+
+          initChart();
+          glContext = initWebGL();
+          glSetup = glContext;
+
+          document.getElementById("status").textContent =
+            "Status: Starting monitoring...";
+          monitorLoop();
+        } catch (e) {
+          alert("Error: " + e.message);
+          stopAttack();
+        }
+      }
+
+      function stopAttack() {
+        isMonitoring = false;
+        document.getElementById("startBtn").disabled = false;
+        document.getElementById("stopBtn").disabled = true;
+        document.getElementById("status").textContent =
+          "Status: Monitoring stopped";
+      }
+
+      function clearData() {
+        timingData = [];
+        if (chartCtx) {
+          chartCtx.clearRect(
+            0,
+            0,
+            chartCtx.canvas.width,
+            chartCtx.canvas.height
+          );
+        }
+        document.getElementById("avgTiming").textContent = "0";
+        document.getElementById("maxTiming").textContent = "0";
+        document.getElementById("jitter").textContent = "0";
+        document.getElementById("samples").textContent = "0";
+      }
+
+      // Initialize on load
+      window.addEventListener("load", () => {
+        initChart();
+      });
+    </script>
+  </body>
+</html>

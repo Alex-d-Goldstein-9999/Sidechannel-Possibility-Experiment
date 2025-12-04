@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPU Side-Channel Attack Demo - Victim</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #1a1a1a;
+        color: #e0e0e0;
+      }
+      .container {
+        background: #2a2a2a;
+        border-radius: 10px;
+        padding: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      }
+      h1 {
+        color: #ff8844;
+        border-bottom: 3px solid #ff8844;
+        padding-bottom: 10px;
+      }
+      .info {
+        background: #2a4a2a;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 20px 0;
+        border-left: 4px solid #44ff44;
+      }
+      button {
+        background: #ff8844;
+        color: #000;
+        border: none;
+        padding: 15px 30px;
+        font-size: 18px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+        margin: 10px;
+        width: 200px;
+      }
+      button:hover {
+        background: #ffaa66;
+      }
+      button:active {
+        transform: scale(0.95);
+      }
+      button.active {
+        background: #ff4444;
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.8;
+        }
+      }
+      .canvas-container {
+        margin: 20px 0;
+        text-align: center;
+      }
+      canvas {
+        border: 2px solid #444;
+        border-radius: 5px;
+        background: #000;
+        cursor: crosshair;
+      }
+      .instructions {
+        background: #4a2a1a;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 20px 0;
+        border-left: 4px solid #ff8844;
+      }
+      .status {
+        padding: 10px;
+        background: #333;
+        border-radius: 5px;
+        margin: 10px 0;
+        text-align: center;
+        font-weight: bold;
+      }
+      .status.active {
+        background: #4a1a1a;
+        color: #ff6666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🟠 Victim Page - GPU Activity</h1>
+
+      <div class="info">
+        <strong>📋 Instructions:</strong>
+        <p>
+          This page creates HEAVY GPU load that will be clearly detected by the
+          attacker page. Open the <code>attacker.html</code> page in another tab
+          and start monitoring, then click "Start GPU Load" on this page to see
+          the attack in action.
+          <strong>Note: This will create significant GPU load.</strong>
+        </p>
+      </div>
+
+      <div class="instructions">
+        <strong>To see the attack:</strong>
+        <ol>
+          <li>Make sure attacker.html is monitoring in another tab</li>
+          <li>Click "Start GPU Load" below</li>
+          <li>Watch the attacker page detect the GPU activity!</li>
+        </ol>
+      </div>
+
+      <div style="text-align: center">
+        <button id="loadBtn" onclick="toggleHeavyLoad()">Start GPU Load</button>
+        <button onclick="clearCanvas()">Clear Canvas</button>
+      </div>
+
+      <div class="status" id="status">
+        Status: Idle - Click button to start GPU load
+      </div>
+
+      <div class="canvas-container">
+        <h3>Interactive Canvas (Draw to trigger additional GPU activity)</h3>
+        <canvas id="drawCanvas" width="600" height="400"></canvas>
+      </div>
+    </div>
+
+    <script>
+      let heavyLoadActive = false;
+      let animationFrame = null;
+      let glContext = null;
+      let glSetup = null;
+
+      // Initialize WebGL for GPU-intensive operations
+      function initWebGL() {
+        const canvas = document.createElement("canvas");
+        // Heavy load: 1024x1024 - significant GPU impact for strong detection
+        canvas.width = 1024;
+        canvas.height = 1024;
+        const gl =
+          canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+        if (!gl) {
+          console.warn("WebGL not available");
+          return null;
+        }
+
+        // Create moderate shader program (reduced complexity)
+        const vertexShaderSource = `
+                attribute vec2 a_position;
+                varying vec2 v_pos;
+                void main() {
+                    v_pos = a_position;
+                    gl_Position = vec4(a_position, 0.0, 1.0);
+                }
+            `;
+
+        const fragmentShaderSource = `
+                precision highp float;
+                varying vec2 v_pos;
+                uniform float u_time;
+                uniform vec2 u_resolution;
+                
+                void main() {
+                    vec2 p = (v_pos + 1.0) * 0.5 * u_resolution;
+                    vec2 center = u_resolution * 0.5;
+                    
+                    // Heavy complexity: 8 loop iterations for significant GPU load
+                    vec3 col = vec3(0.0);
+                    for (int i = 0; i < 8; i++) {
+                        float angle = float(i) * 0.785 + u_time;
+                        vec2 offset = vec2(cos(angle), sin(angle)) * 60.0;
+                        float dist = length(p - center - offset);
+                        // More complex calculations per iteration
+                        col += vec3(
+                            sin(dist * 0.1 + u_time) * 0.12,
+                            cos(dist * 0.15 + u_time * 1.2) * 0.12,
+                            sin(dist * 0.12 + u_time * 0.8) * 0.12
+                        );
+                        // Additional computation
+                        col += vec3(
+                            cos(dist * 0.08 + angle) * 0.05,
+                            sin(dist * 0.11 + angle * 1.1) * 0.05,
+                            cos(dist * 0.09 + angle * 0.9) * 0.05
+                        );
+                    }
+                    
+                    // Complex pattern calculations
+                    float pattern1 = sin(p.x * 0.02 + u_time) * cos(p.y * 0.02 + u_time);
+                    float pattern2 = sin(length(p - center) * 0.05 + u_time * 1.5);
+                    float pattern3 = cos(atan(p.y - center.y, p.x - center.x) * 3.0 + u_time);
+                    col += vec3(pattern1 * 0.2, pattern2 * 0.15, pattern3 * 0.15);
+                    
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+
+        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vertexShader, vertexShaderSource);
+        gl.compileShader(vertexShader);
+
+        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fragmentShader, fragmentShaderSource);
+        gl.compileShader(fragmentShader);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // Create buffer
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        const positionLocation = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+        const timeLocation = gl.getUniformLocation(program, "u_time");
+        const resolutionLocation = gl.getUniformLocation(
+          program,
+          "u_resolution"
+        );
+
+        gl.viewport(0, 0, 1024, 1024);
+        gl.uniform2f(resolutionLocation, 1024, 1024);
+
+        return { gl, program, timeLocation, buffer };
+      }
+
+      // Heavy GPU load loop - creates significant GPU usage for strong detection
+      let lastFrameTime = 0;
+      const targetFPS = 30; // Higher frame rate for sustained heavy load
+      const frameInterval = 1000 / targetFPS;
+
+      function heavyLoadLoop(currentTime) {
+        if (!heavyLoadActive) return;
+
+        // Throttle to target FPS to reduce system load
+        if (currentTime - lastFrameTime < frameInterval) {
+          animationFrame = requestAnimationFrame(heavyLoadLoop);
+          return;
+        }
+        lastFrameTime = currentTime || performance.now();
+
+        const { gl, timeLocation } = glSetup;
+        const time = performance.now() / 1000.0;
+
+        gl.uniform1f(timeLocation, time);
+
+        // Heavy draw calls - 20 draws per frame for significant GPU load
+        for (let i = 0; i < 20; i++) {
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        gl.finish();
+
+        // Continue loop with throttled frame rate
+        animationFrame = requestAnimationFrame(heavyLoadLoop);
+      }
+
+      function toggleHeavyLoad() {
+        if (heavyLoadActive) {
+          stopHeavyLoad();
+        } else {
+          startHeavyLoad();
+        }
+      }
+
+      function startHeavyLoad() {
+        if (heavyLoadActive) return;
+
+        try {
+          if (!glContext) {
+            glContext = initWebGL();
+            if (!glContext) {
+              alert("WebGL not available");
+              return;
+            }
+            glSetup = glContext;
+          }
+
+          heavyLoadActive = true;
+          lastFrameTime = performance.now();
+          document.getElementById("loadBtn").textContent = "Stop GPU Load";
+          document.getElementById("loadBtn").classList.add("active");
+          document.getElementById("status").textContent =
+            "Status: HEAVY GPU LOAD ACTIVE - Attacker should clearly detect this!";
+          document.getElementById("status").classList.add("active");
+
+          animationFrame = requestAnimationFrame(heavyLoadLoop);
+        } catch (e) {
+          alert("Error starting GPU load: " + e.message);
+        }
+      }
+
+      function stopHeavyLoad() {
+        heavyLoadActive = false;
+        if (animationFrame) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = null;
+        }
+        document.getElementById("loadBtn").textContent = "Start GPU Load";
+        document.getElementById("loadBtn").classList.remove("active");
+        document.getElementById("status").textContent =
+          "Status: GPU load stopped";
+        document.getElementById("status").classList.remove("active");
+      }
+
+      // Canvas drawing (triggers additional GPU activity)
+      const canvas = document.getElementById("drawCanvas");
+      const ctx = canvas.getContext("2d");
+      let isDrawing = false;
+      let lastX = 0;
+      let lastY = 0;
+
+      canvas.addEventListener("mousedown", (e) => {
+        isDrawing = true;
+        const rect = canvas.getBoundingClientRect();
+        lastX = e.clientX - rect.left;
+        lastY = e.clientY - rect.top;
+      });
+
+      canvas.addEventListener("mousemove", (e) => {
+        if (!isDrawing) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        ctx.strokeStyle = `hsl(${(Date.now() / 10) % 360}, 70%, 50%)`;
+        ctx.lineWidth = 5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+
+        lastX = x;
+        lastY = y;
+      });
+
+      canvas.addEventListener("mouseup", () => {
+        isDrawing = false;
+      });
+
+      canvas.addEventListener("mouseleave", () => {
+        isDrawing = false;
+      });
+
+      function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      // Cleanup on page unload
+      window.addEventListener("beforeunload", () => {
+        stopHeavyLoad();
+      });
+    </script>
+  </body>
+</html>
